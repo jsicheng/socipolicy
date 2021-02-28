@@ -1,7 +1,6 @@
 import snscrape.modules.twitter as sntwitter
 from datetime import date, datetime
 import covidcast
-import argparse
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import OneHotEncoder
@@ -70,7 +69,7 @@ def get_trends_data(data_file, trend):
     trends_data["geo_value"] = "us"
 
     import os
-    file_list = os.listdir("trends_{}".format(trend))
+    file_list = os.listdir(os.path.join(settings.BASE_DIR, "trends_{}".format(trend)))
     for file in file_list:
         if file != "{}_us.csv".format(trend):
             state = file.split(".")[0][-2:]
