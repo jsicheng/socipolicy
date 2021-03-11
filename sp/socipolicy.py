@@ -9,11 +9,16 @@ import os
 from django.conf import settings
 import plotly.graph_objects as go
 
-def get_tweets(user, keyword, since, lang='lang:en'):
+MASK_DATE = "2021-02-12"
+VACCINE_DATE = "2021-03-08"
+
+def get_tweets(user, dataset, keyword, since, lang='lang:en'):
     user = 'from:' + user + ' '
     keyword += ' '
     since = 'since:' + since + ' '
-    until = 'until:2021-01-31 '
+    until = 'until:' + MASK_DATE + ' '
+    if dataset.lower() == 'vaccine':
+        until = 'until:' + VACCINE_DATE + ' '
     maxTweets = 1000
     tweets = []
     for i,tweet in enumerate(sntwitter.TwitterSearchScraper(user + keyword + since + until + lang).get_items()) :
@@ -34,8 +39,8 @@ def get_tweets(user, keyword, since, lang='lang:en'):
 def get_covidcast_data():
     mask_since_date = datetime.strptime("2020-10-09", '%Y-%m-%d')
     vaccine_since_date = datetime.strptime("2020-12-27", '%Y-%m-%d')
-    mask_until_date = datetime.strptime("2021-2-12", '%Y-%m-%d')
-    vaccine_until_date = datetime.strptime("2021-2-25", '%Y-%m-%d')
+    mask_until_date = datetime.strptime(MASK_DATE, '%Y-%m-%d')
+    vaccine_until_date = datetime.strptime(VACCINE_DATE, '%Y-%m-%d')
     
     mask_state = covidcast.signal("fb-survey", "smoothed_wearing_mask", mask_since_date, mask_until_date, "state")  
     vaccine_state = covidcast.signal("fb-survey", "smoothed_accept_covid_vaccine", vaccine_since_date, vaccine_until_date, "state")
@@ -108,7 +113,7 @@ def process_data(tweets, use_trends, geo_value, data_file):
     X = np.array(training_data)
     y = np.array(data["value"])
     
-    return X, y, likeCount, retweetCount, replyCount, quoteCount, enc, sample_size
+    return X, y, likeCount, retweetCount, replyCount, quoteCount, enc, sample_size, tweet_data
 
 def split_data(X, y):
     tscv = TimeSeriesSplit(n_splits=5)
@@ -152,18 +157,18 @@ def socipolicy(user, dataset, from_date, target_date, location, use_trends):
     data_file = "mask_all.csv"
     if dataset.lower() == 'vaccine':
         data_file = "vaccine_all.csv"
-        tweets = get_tweets(user=user, keyword='(covid-19 vaccine OR #covid19 vaccine)', since=from_date, lang='lang:en')
+        tweets = get_tweets(user=user, dataset=dataset, keyword='(covid-19 vaccine OR #covid19 vaccine)', since=from_date, lang='lang:en')
         if len(tweets) <= 0:
             print("{} has not made a Covid-19 vaccine related Tweet since {}.".format(user, from_date))
-            quit()
+            return None, None, None, None
     else:
         data_file = "mask_all.csv"
-        tweets = get_tweets(user=user, keyword='(mask OR masks)', since=from_date, lang='lang:en')
+        tweets = get_tweets(user=user, dataset=dataset, keyword='(mask OR masks)', since=from_date, lang='lang:en')
         if len(tweets) <= 0:
             print("{} has not made a mask related Tweet since {}.".format(user, from_date))
-            quit()
+            return None, None, None, None
     
-    X, y, likeCount, retweetCount, replyCount, quoteCount, enc, sample_size = process_data(tweets, use_trends, location, os.path.join(settings.BASE_DIR, data_file))
+    X, y, likeCount, retweetCount, replyCount, quoteCount, enc, sample_size, tweet_data = process_data(tweets, use_trends, location, os.path.join(settings.BASE_DIR, data_file))
     train_X, train_y, test_X, test_y = split_data(X, y)
     model = train_model(train_X, train_y, test_X, test_y)
     baseline, tweeted = predict(model, target_date, location, use_trends, likeCount, retweetCount, replyCount, quoteCount, enc)
@@ -172,13 +177,14 @@ def socipolicy(user, dataset, from_date, target_date, location, use_trends):
     data = data.loc[data['geo_value'] == location]
     last_date = data["time_value"].tail(1).item()
     last_value = data["value"].tail(1).item()
-
+    tweet_data = tweet_data.merge(data, how="left", on="time_value").reset_index(drop=True)
     
-
+    
     past_trace = go.Scatter(x=data['time_value'], y=data["value"], name="Past Data", mode="lines")
+    tweets_trace = go.Scatter(x=tweet_data['time_value'], y=tweet_data["value"], name="Tweet Made", mode="markers")
     baseline_trace = go.Scatter(x=[last_date, target_date], y=[last_value, baseline[0]], name="Baseline Prediction", mode="lines+markers")
     tweeted_trace = go.Scatter(x=[last_date, target_date], y=[last_value, tweeted[0]], name="Tweet Prediction", mode="lines+markers")
-    graph = [past_trace, baseline_trace, tweeted_trace]
+    graph = [past_trace, tweets_trace, baseline_trace, tweeted_trace]
     fig = go.Figure(graph)
     graph_html = fig.to_html()
     return baseline, tweeted, sample_size, graph_html

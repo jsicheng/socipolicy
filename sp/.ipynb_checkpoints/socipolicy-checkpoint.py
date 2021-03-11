@@ -1,18 +1,24 @@
 import snscrape.modules.twitter as sntwitter
 from datetime import date, datetime
 import covidcast
-import argparse
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.model_selection import TimeSeriesSplit
+import os
+from django.conf import settings
+import plotly.graph_objects as go
 
+MASK_DATE = "2021-02-12"
+VACCINE_DATE = "2021-03-08"
 
-def get_tweets(user, keyword, since, lang='lang:en'):
+def get_tweets(user, dataset, keyword, since, lang='lang:en'):
     user = 'from:' + user + ' '
     keyword += ' '
     since = 'since:' + since + ' '
-    until = 'until:2021-01-31 '
+    until = 'until:' + MASK_DATE + ' '
+    if dataset.lower() == 'vaccine':
+        until = 'until:' + VACCINE_DATE + ' '
     maxTweets = 1000
     tweets = []
     for i,tweet in enumerate(sntwitter.TwitterSearchScraper(user + keyword + since + until + lang).get_items()) :
@@ -33,8 +39,8 @@ def get_tweets(user, keyword, since, lang='lang:en'):
 def get_covidcast_data():
     mask_since_date = datetime.strptime("2020-10-09", '%Y-%m-%d')
     vaccine_since_date = datetime.strptime("2020-12-27", '%Y-%m-%d')
-    mask_until_date = datetime.strptime("2021-2-12", '%Y-%m-%d')
-    vaccine_until_date = datetime.strptime("2021-2-25", '%Y-%m-%d')
+    mask_until_date = datetime.strptime(MASK_DATE, '%Y-%m-%d')
+    vaccine_until_date = datetime.strptime(VACCINE_DATE, '%Y-%m-%d')
     
     mask_state = covidcast.signal("fb-survey", "smoothed_wearing_mask", mask_since_date, mask_until_date, "state")  
     vaccine_state = covidcast.signal("fb-survey", "smoothed_accept_covid_vaccine", vaccine_since_date, vaccine_until_date, "state")
@@ -68,7 +74,7 @@ def get_trends_data(data_file, trend):
     trends_data["geo_value"] = "us"
 
     import os
-    file_list = os.listdir("trends_{}".format(trend))
+    file_list = os.listdir(os.path.join(settings.BASE_DIR, "trends_{}".format(trend)))
     for file in file_list:
         if file != "{}_us.csv".format(trend):
             state = file.split(".")[0][-2:]
@@ -80,17 +86,17 @@ def get_trends_data(data_file, trend):
     trends_data.sort_values(["time_value", "geo_value"], inplace=True)
     trends_data.reset_index(drop=True, inplace=True)
     
-    mask_all = covidcast_data.merge(trends_data, how="inner", on=["time_value", "geo_value"]).reset_index(drop=True)
-    mask_all.drop(mask_all.columns[0], axis=1, inplace=True)
-    mask_all.to_csv("{}_all.csv".format(trend))
+    full_data = covidcast_data.merge(trends_data, how="inner", on=["time_value", "geo_value"]).reset_index(drop=True)
+    full_data.drop(full_data.columns[0], axis=1, inplace=True)
+    full_data.to_csv("{}_all.csv".format(trend))
 
 
-def process_data(tweets, use_trends, geo_value, mask_file="mask_all.csv"):
-    mask_data = pd.read_csv(mask_file)
-    sample_size = mask_data.query('geo_value == "{}"'.format(geo_value)).groupby("geo_value").mean()["sample_size"].sum()
-    training_data = mask_data[["time_value", "geo_value", "trend"]].reset_index(drop=True)
+def process_data(tweets, use_trends, geo_value, data_file):
+    data = pd.read_csv(data_file)
+    sample_size = data.query('geo_value == "{}"'.format(geo_value)).groupby("geo_value").mean()["sample_size"].sum()
+    training_data = data[["time_value", "geo_value", "trend"]].reset_index(drop=True)
     if use_trends == -1:
-        training_data = mask_data[["time_value", "geo_value"]].reset_index(drop=True)
+        training_data = data[["time_value", "geo_value"]].reset_index(drop=True)
     tweet_data = pd.DataFrame.from_records(tweets).groupby("time_value").sum()
     likeCount = tweet_data["likeCount"].mean()
     retweetCount = tweet_data["retweetCount"].mean()
@@ -105,9 +111,9 @@ def process_data(tweets, use_trends, geo_value, mask_file="mask_all.csv"):
     training_data = training_data.join(enc_df).drop(training_data[["geo_value"]], axis=1)
 
     X = np.array(training_data)
-    y = np.array(mask_data["value"])
+    y = np.array(data["value"])
     
-    return X, y, likeCount, retweetCount, replyCount, quoteCount, enc, sample_size
+    return X, y, likeCount, retweetCount, replyCount, quoteCount, enc, sample_size, tweet_data
 
 def split_data(X, y):
     tscv = TimeSeriesSplit(n_splits=5)
@@ -144,43 +150,41 @@ def predict(model, time_value, geo_value, trend, likeCount, retweetCount, replyC
     
     return baseline, tweeted
     
-def analyze(user, dataset, from_date, target_date, location, use_trends):
+def socipolicy(user, dataset, from_date, target_date, location, use_trends):
     location = location.lower()
     
     tweets = []
+    data_file = "mask_all.csv"
     if dataset.lower() == 'vaccine':
-        tweets = get_tweets(user=user, keyword='(covid-19 vaccine OR #covid19 vaccine)', since=from_date, lang='lang:en')
+        data_file = "vaccine_all.csv"
+        tweets = get_tweets(user=user, dataset=dataset, keyword='(covid-19 vaccine OR #covid19 vaccine)', since=from_date, lang='lang:en')
         if len(tweets) <= 0:
             print("{} has not made a Covid-19 vaccine related Tweet since {}.".format(user, from_date))
-            quit()
+            return None, None, None, None
     else:
-        tweets = get_tweets(user=user, keyword='(mask OR masks)', since=from_date, lang='lang:en')
+        data_file = "mask_all.csv"
+        tweets = get_tweets(user=user, dataset=dataset, keyword='(mask OR masks)', since=from_date, lang='lang:en')
         if len(tweets) <= 0:
             print("{} has not made a mask related Tweet since {}.".format(user, from_date))
-            quit()
+            return None, None, None, None
     
-    X, y, likeCount, retweetCount, replyCount, quoteCount, enc, sample_size = process_data(tweets, use_trends, location)
+    X, y, likeCount, retweetCount, replyCount, quoteCount, enc, sample_size, tweet_data = process_data(tweets, use_trends, location, os.path.join(settings.BASE_DIR, data_file))
     train_X, train_y, test_X, test_y = split_data(X, y)
     model = train_model(train_X, train_y, test_X, test_y)
     baseline, tweeted = predict(model, target_date, location, use_trends, likeCount, retweetCount, replyCount, quoteCount, enc)
     
-    return baseline, tweeted, sample_size
-#     location = location.upper()
-#     if dataset.lower() == 'vaccine':
-#         print("Predicted baseline vaccine acceptance likelihood in {}: {}".format([location], baseline))
-#         print("Predicted vaccine acceptance likelihood in {} if a Tweet was made by {}: {}".format([location], [user], tweeted))
-#     else:
-#         print("Predicted baseline mask wearing likelihood in {}: {}".format([location], baseline))
-#         print("Predicted mask wearing likelihood in {} if a Tweet was made by {}: {}".format([location], [user], tweeted))
-
-#     baseline_increase = baseline * sample_size / 100
-#     tweeted_increase = tweeted * sample_size / 100
-#     change = tweeted_increase - baseline_increase
-#     increase = "[more]"
-#     if change < 0:
-#         increase = "[less]"
-        
-#     if dataset.lower() == 'vaccine':
-#         print("With a average sample size of {}, Tweeting may cause {} {} people to accept vaccines.".format([round(sample_size)], [abs(int(change))], increase))
-#     else:
-#         print("With a average sample size of {}, Tweeting may cause {} {} people to wear masks.".format([round(sample_size)], [abs(int(change))], increase))
+    data = pd.read_csv(data_file)
+    data = data.loc[data['geo_value'] == location]
+    last_date = data["time_value"].tail(1).item()
+    last_value = data["value"].tail(1).item()
+    tweet_data = tweet_data.merge(data, how="left", on="time_value").reset_index(drop=True)
+    
+    
+    past_trace = go.Scatter(x=data['time_value'], y=data["value"], name="Past Data", mode="lines")
+    tweets_trace = go.Scatter(x=tweet_data['time_value'], y=tweet_data["value"], name="Tweet Made", mode="markers")
+    baseline_trace = go.Scatter(x=[last_date, target_date], y=[last_value, baseline[0]], name="Baseline Prediction", mode="lines+markers")
+    tweeted_trace = go.Scatter(x=[last_date, target_date], y=[last_value, tweeted[0]], name="Tweet Prediction", mode="lines+markers")
+    graph = [past_trace, tweets_trace, baseline_trace, tweeted_trace]
+    fig = go.Figure(graph)
+    graph_html = fig.to_html()
+    return baseline, tweeted, sample_size, graph_html

@@ -24,7 +24,7 @@
       <input type="date" id="from" name="from" value="2020-10-09" min="2020-10-09"> <br>
       <br>
       <label for="target">Select target date for prediction:</label> <br>
-      <input type="date" id="target" name="target"> <br>
+      <input type="date" id="target" name="target" value="2021-03-01"> <br>
       <br>
       <label for="dataset">Choose which data to use:</label> <br>
       <input type="radio" id="mask" name="dataset" value="mask" checked>
@@ -100,7 +100,6 @@
 
   <div class="col2" style="float:right; margin: 1.5%;">
     <h1>{{results}}</h1>
-    <p> {{output}} </p>
     <p> {{baseline_output}} </p>
     <p> {{tweeted_output}} </p>
     <p> {{increase_output}} </p>
