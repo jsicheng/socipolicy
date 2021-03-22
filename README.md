@@ -1,4 +1,4 @@
-# socipolicy
+# Socipolicy
 Predicting Covid-19 Policy Compliance using Twitter Data
 
 Currently supported dataset:
