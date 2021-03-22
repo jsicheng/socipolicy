@@ -2,8 +2,8 @@
 Predicting Covid-19 Policy Compliance using Twitter Data
 
 Currently supported dataset:
--Mask Wearing Likelihood
--Covid-19 Vaccine Acceptance
+- Mask Wearing Likelihood
+- Covid-19 Vaccine Acceptance
 
 ## Setup
 ```
