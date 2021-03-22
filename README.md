@@ -17,4 +17,4 @@ python manage.py runserver
 ```
 The website will be deployed at http://localhost:8000
 
-The website is setup to deploy on Heroku, however since Twitter blocks all AWS IPs, snscrape will [not work](https://github.com/JustAnotherArchivist/snscrape/issues/79) on Heroku.
+The website is also setup to deploy on Heroku, however since Twitter blocks all AWS IPs, snscrape will [not work](https://github.com/JustAnotherArchivist/snscrape/issues/79) on Heroku.
